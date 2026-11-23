@@ -9,12 +9,10 @@ const byCU = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 // ---------------------------------------------------------------- text helpers
 
 const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-const ESC_TEST = /[&<>"']/;
 const ESC_RE = /[&<>"']/g;
 
-/** HTML-escape a string; strings with nothing to escape are returned as they are. */
+/** HTML-escape a string in one scan; with nothing to escape the string is returned as it is. */
 function esc(s) {
-  if (!ESC_TEST.test(s)) return s;
   return s.replace(ESC_RE, (c) => ESC_MAP[c]);
 }
 
@@ -380,54 +378,54 @@ function escChar(c) {
 
 /** `s` rendered inline; `link(target)` resolves a link's href. Plain runs are sliced, never per-char. */
 function inline(s, link) {
-  let out = '';
+  const parts = [];
   let i = 0;
   const n = s.length;
   while (i < n) {
     SPEC_RE.lastIndex = i;
     const m = SPEC_RE.exec(s);
-    if (m === null) { out += s.slice(i); break; }
+    if (m === null) { parts.push(s.slice(i)); break; }
     const j = m.index;
-    if (j > i) out += s.slice(i, j);
+    if (j > i) parts.push(s.slice(i, j));
     const c = s[j];
     i = j;
     if (c === '&' || c === '<' || c === '>' || c === '"' || c === "'") {
-      out += ESC_MAP[c];
+      parts.push(ESC_MAP[c]);
       i++;
     } else if (c === '\\') {
       if (i + 1 < n && ESCAPABLE.indexOf(s[i + 1]) !== -1) {
-        out += escChar(s[i + 1]);
+        parts.push(escChar(s[i + 1]));
         i += 2;
       } else {
-        out += '\\';
+        parts.push('\\');
         i++;
       }
     } else if (c === '`') {
       const k = s.indexOf('`', i + 1);
       if (k > i + 1) {
-        out += `<code>${esc(s.slice(i + 1, k))}</code>`;
+        parts.push(`<code>${esc(s.slice(i + 1, k))}</code>`);
         i = k + 1;
       } else {
-        out += '`';
+        parts.push('`');
         i++;
       }
     } else if (c === '*') {
       if (s[i + 1] === '*') {
         const k = findUnescaped(s, '**', i + 2);
         if (k > i + 2) {
-          out += `<strong>${inline(s.slice(i + 2, k), link)}</strong>`;
+          parts.push(`<strong>${inline(s.slice(i + 2, k), link)}</strong>`);
           i = k + 2;
         } else {
-          out += '**';
+          parts.push('**');
           i += 2;
         }
       } else {
         const k = findSingleStar(s, i + 1);
         if (k > i + 1) {
-          out += `<em>${inline(s.slice(i + 1, k), link)}</em>`;
+          parts.push(`<em>${inline(s.slice(i + 1, k), link)}</em>`);
           i = k + 1;
         } else {
-          out += '*';
+          parts.push('*');
           i++;
         }
       }
@@ -436,15 +434,15 @@ function inline(s, link) {
       const mm = k !== -1 && s[k + 1] === '(' ? s.indexOf(')', k + 2) : -1;
       const target = mm === -1 ? '' : s.slice(k + 2, mm);
       if (target !== '' && !WS_TEST.test(target)) {
-        out += `<a href="${esc(link(target))}">${inline(s.slice(i + 1, k), link)}</a>`;
+        parts.push(`<a href="${esc(link(target))}">${inline(s.slice(i + 1, k), link)}</a>`);
         i = mm + 1;
       } else {
-        out += '[';
+        parts.push('[');
         i++;
       }
     }
   }
-  return out;
+  return parts.join('');
 }
 
 /**
@@ -455,7 +453,7 @@ function renderMarkdown(src, link) {
   const n = lines.length;
   const ids = new Set();
   const toc = [];
-  let out = '';
+  const parts = [];
   let excerpt = null;
   let i = 0;
   while (i < n) {
@@ -464,22 +462,22 @@ function renderMarkdown(src, link) {
     const lang = fenceLang(line);
     if (lang !== null) {
       i++;
-      let body = '';
-      while (i < n && !isFenceClose(lines[i])) { body += `${esc(lines[i])}\n`; i++; }
+      const body = [];
+      while (i < n && !isFenceClose(lines[i])) { body.push(esc(lines[i]), '\n'); i++; }
       i++;
-      out += lang === '' ? `<pre><code>${body}</code></pre>\n` : `<pre><code class="language-${esc(lang)}">${body}</code></pre>\n`;
+      parts.push(lang === '' ? `<pre><code>${body.join('')}</code></pre>\n` : `<pre><code class="language-${esc(lang)}">${body.join('')}</code></pre>\n`);
       continue;
     }
     const heading = headingOf(line);
     if (heading !== null) {
       const id = uniqueSlug(slugify(heading.text), ids);
       const html = inline(heading.text, link);
-      out += `<h${heading.depth} id="${id}">${html}</h${heading.depth}>\n`;
+      parts.push(`<h${heading.depth} id="${id}">${html}</h${heading.depth}>\n`);
       if (heading.depth === 2 || heading.depth === 3) toc.push({ level: heading.depth, id, html });
       i++;
       continue;
     }
-    if (isHR(line)) { out += '<hr>\n'; i++; continue; }
+    if (isHR(line)) { parts.push('<hr>\n'); i++; continue; }
     if (line[0] === '>') {
       const kept = [];
       while (i < n && lines[i][0] === '>') {
@@ -489,7 +487,7 @@ function renderMarkdown(src, link) {
         if (t !== '') kept.push(t);
         i++;
       }
-      out += kept.length === 0 ? '<blockquote>\n</blockquote>\n' : `<blockquote>\n<p>${inline(kept.join('\n'), link)}</p>\n</blockquote>\n`;
+      parts.push(kept.length === 0 ? '<blockquote>\n</blockquote>\n' : `<blockquote>\n<p>${inline(kept.join('\n'), link)}</p>\n</blockquote>\n`);
       continue;
     }
     const bOff = bulletOff(line);
@@ -514,9 +512,10 @@ function renderMarkdown(src, link) {
       }
       const tag = isOrdered ? 'ol' : 'ul';
       const open = isOrdered && oOff.num !== 1 ? `<ol start="${oOff.num}">` : `<${tag}>`;
-      let block = `${open}\n`;
-      for (const parts of items) block += `<li>${inline(parts.join('\n'), link)}</li>\n`;
-      out += `${block}</${tag}>\n`;
+      const block = [`${open}\n`];
+      for (const pit of items) block.push(`<li>${inline(pit.join('\n'), link)}</li>\n`);
+      block.push(`</${tag}>\n`);
+      parts.push(block.join(''));
       continue;
     }
     let text = trimLine(line);
@@ -524,9 +523,9 @@ function renderMarkdown(src, link) {
     while (i < n && !endsParagraph(lines[i])) { text += `\n${trimLine(lines[i])}`; i++; }
     const html = inline(text, link);
     if (excerpt === null) excerpt = html;
-    out += `<p>${html}</p>\n`;
+    parts.push(`<p>${html}</p>\n`);
   }
-  return { html: out, toc, excerpt: excerpt ?? '' };
+  return { html: parts.join(''), toc, excerpt: excerpt ?? '' };
 }
 
 // ---------------------------------------------------------------- templates
@@ -634,27 +633,26 @@ function truthy(v) {
 
 let G_TEMPLATES = null;
 
-function renderNodes(nodes, scope, depth) {
-  let out = '';
+function renderNodes(nodes, scope, depth, parts) {
   for (let idx = 0; idx < nodes.length; idx++) {
     const nd = nodes[idx];
     switch (nd.k) {
       case 0:
-        out += nd.text;
+        parts.push(nd.text);
         break;
       case 1: {
         const v = lookup(scope, nd.path);
-        out += typeof v === 'string' ? esc(v) : esc(textOf(v));
+        parts.push(typeof v === 'string' ? esc(v) : esc(textOf(v)));
         break;
       }
       case 2: {
         const v = lookup(scope, nd.path);
-        out += typeof v === 'string' ? v : textOf(v);
+        parts.push(typeof v === 'string' ? v : textOf(v));
         break;
       }
       case 3: {
         const branch = truthy(lookup(scope, nd.path)) !== nd.not ? nd.then : nd.else;
-        if (branch !== null) out += renderNodes(branch, scope, depth);
+        if (branch !== null) renderNodes(branch, scope, depth, parts);
         break;
       }
       case 4: {
@@ -663,18 +661,17 @@ function renderNodes(nodes, scope, depth) {
         const len = xs.length;
         for (let k = 0; k < len; k++) {
           const vars = { [nd.name]: xs[k], loop: { index: k + 1, first: k === 0, last: k === len - 1, length: len } };
-          out += renderNodes(nd.body, { vars, parent: scope }, depth);
+          renderNodes(nd.body, { vars, parent: scope }, depth, parts);
         }
         break;
       }
       case 5: {
         const t = G_TEMPLATES.get(nd.name);
-        if (t !== undefined && depth < INCLUDE_DEPTH) out += renderNodes(t, scope, depth + 1);
+        if (t !== undefined && depth < INCLUDE_DEPTH) renderNodes(t, scope, depth + 1, parts);
         break;
       }
     }
   }
-  return out;
 }
 
 // ---------------------------------------------------------------- the build
@@ -740,7 +737,7 @@ export function run(input) {
   let sources = [];
   const statics = [];
   for (const f of files) {
-    if (f.path.endsWith('.md')) sources.push({ path: f.path, text: f.content.replace(/\r\n?/g, '\n') });
+    if (f.path.endsWith('.md')) sources.push({ path: f.path, text: f.content.includes('\r') ? f.content.replace(/\r\n?/g, '\n') : f.content });
     else statics.push({ path: f.path, content: f.content });
   }
 
@@ -848,16 +845,20 @@ export function run(input) {
   const allTags = tags.map((t) => ({ name: t.name, slug: t.slug, url: t.url, count: t.posts.length }));
   const recent = posts.slice(0, input.site.recent).map((p) => getCard(p));
   G_TEMPLATES = templates;
+  const baseScope = { vars: { site, tags: allTags, recent }, parent: null };
   const render = (name, vars) => {
     const nodes = templates.get(name);
-    return nodes === undefined ? null : renderNodes(nodes, { vars: { site, tags: allTags, recent, ...vars }, parent: null }, 0);
+    if (nodes === undefined) return null;
+    const parts = [];
+    renderNodes(nodes, { vars, parent: baseScope }, 0, parts);
+    return parts.join('');
   };
   for (const s of sources) {
     const page = {
       ...getCard(s),
       slug: s.slug,
       content: s.html,
-      toc: s.toc.map((h) => ({ level: h.level, id: h.id, html: h.html })),
+      toc: s.toc,
       newer: linkOf(s.newer ?? null),
       older: linkOf(s.older ?? null),
       is_post: s.post,
